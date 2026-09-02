@@ -5,9 +5,9 @@ This repository contains two independent automation suites built on a shared Jav
 - REST API automation for the public Restful Booker test service.
 - Android UI automation for Sauce Labs My Demo App.
 
-The project supports local development and a repeatable manual-to-automation workflow. CI/CD
-publishing is deliberately deferred until the target platform and test-management system are
-confirmed.
+The project supports local development, a repeatable manual-to-automation workflow, and a GitHub
+Actions quality gate for the API suite. Mobile device-cloud execution and external test-management
+publishing remain deferred until their target platforms are selected.
 
 ## Framework capabilities
 
@@ -190,6 +190,11 @@ $env:BOOKER_USERNAME = '<username>'
 $env:BOOKER_PASSWORD = '<password>'
 ```
 
+Restful Booker uses published playground credentials. They are suitable for trying the framework,
+but the values are intentionally not committed. Copy them from the Restful Booker documentation
+and supply them through environment variables, JVM properties, or GitHub secrets. This keeps the
+same setup usable when the public playground is replaced by a private test environment.
+
 The loader rejects a partially configured credential pair. Configuration objects and logs redact
 credential values.
 
@@ -211,6 +216,27 @@ Windows PowerShell:
 ```powershell
 .\mvnw.cmd clean test
 ```
+
+For a one-command trial without changing the current macOS shell environment:
+
+```bash
+BOOKER_USERNAME='<published playground username>' \
+BOOKER_PASSWORD='<published playground password>' \
+./mvnw clean test
+```
+
+For the equivalent trial in Windows PowerShell:
+
+```powershell
+$env:BOOKER_USERNAME = '<published playground username>'
+$env:BOOKER_PASSWORD = '<published playground password>'
+.\mvnw.cmd clean test
+Remove-Item Env:BOOKER_USERNAME
+Remove-Item Env:BOOKER_PASSWORD
+```
+
+The macOS values apply only to that command. The PowerShell values apply to the current process, so
+the final two lines remove them after the run.
 
 Use `clean` so old Allure results are not mixed into the current run.
 
@@ -380,26 +406,42 @@ setting unless a device pool, unique UDIDs, and isolated Appium ports are implem
 | Invalid username | `mobile.invalidUsername` | `MOBILE_INVALID_USERNAME` | None |
 | Invalid password | `mobile.invalidPassword` | `MOBILE_INVALID_PASSWORD` | None |
 
-Set credentials and run on macOS:
+The local mobile verification used the Android Virtual Device `Pixel_API_35` with UDID
+`emulator-5554`. These are safe device identifiers, not credentials. Confirm the current UDID with
+`adb devices -l`; replace both values when your AVD has a different name or identifier.
+
+Run the same locally verified configuration on macOS. Replace the credential placeholders with the
+published My Demo App login values and keep the invalid pair deliberately invalid:
 
 ```bash
-export MOBILE_VALID_USERNAME='<valid demo username>'
-export MOBILE_VALID_PASSWORD='<valid demo password>'
-export MOBILE_INVALID_USERNAME='<invalid username>'
-export MOBILE_INVALID_PASSWORD='<invalid password>'
-
-./mvnw clean test -Dtest.suite=src/test/resources/suites/android-testng.xml
+MOBILE_VALID_USERNAME='<published demo username>' \
+MOBILE_VALID_PASSWORD='<published demo password>' \
+MOBILE_INVALID_USERNAME='<invalid test username>' \
+MOBILE_INVALID_PASSWORD='<invalid test password>' \
+ANDROID_UDID='emulator-5554' \
+ANDROID_DEVICE_NAME='Pixel_API_35' \
+./mvnw clean test \
+  -Dtest.suite=src/test/resources/suites/android-testng.xml
 ```
 
-Set credentials and run on Windows PowerShell:
+Run the equivalent configuration on Windows PowerShell:
 
 ```powershell
-$env:MOBILE_VALID_USERNAME = '<valid demo username>'
-$env:MOBILE_VALID_PASSWORD = '<valid demo password>'
-$env:MOBILE_INVALID_USERNAME = '<invalid username>'
-$env:MOBILE_INVALID_PASSWORD = '<invalid password>'
+$env:MOBILE_VALID_USERNAME = '<published demo username>'
+$env:MOBILE_VALID_PASSWORD = '<published demo password>'
+$env:MOBILE_INVALID_USERNAME = '<invalid test username>'
+$env:MOBILE_INVALID_PASSWORD = '<invalid test password>'
+$env:ANDROID_UDID = 'emulator-5554'
+$env:ANDROID_DEVICE_NAME = 'Pixel_API_35'
 
 .\mvnw.cmd clean test "-Dtest.suite=src/test/resources/suites/android-testng.xml"
+
+Remove-Item Env:MOBILE_VALID_USERNAME
+Remove-Item Env:MOBILE_VALID_PASSWORD
+Remove-Item Env:MOBILE_INVALID_USERNAME
+Remove-Item Env:MOBILE_INVALID_PASSWORD
+Remove-Item Env:ANDROID_UDID
+Remove-Item Env:ANDROID_DEVICE_NAME
 ```
 
 Optional device overrides on macOS:
@@ -638,17 +680,146 @@ Run `scripts/check-framework.sh` before handoff. It rejects global REST Assured 
 TestNG order dependencies, fixed sleeps, uncontrolled request logging, absolute endpoint URLs in
 Java source, unsupported API model patterns, known sample credentials, and missing framework files.
 
-## CI/CD status
+## GitHub Actions
 
-Local execution and report generation are complete. CI/CD can be added later without changing test
-methods because Surefire XML, Allure results, sanitized logs, and `test-run-summary.json` are already
-produced. Before adding a pipeline, decide:
+`.github/workflows/api-tests.yml` defines the API quality gate. It runs on pull requests, pushes to
+`main`, and manual dispatches.
 
-- Which API environment and secret store will be used.
-- Whether Android runs on a hosted emulator, self-hosted runner, or device farm.
-- The approved API concurrency for that environment.
-- Where Allure history and HTML reports will be retained.
-- Whether results will be published to Xray, Zephyr, or another test-management system.
+The workflow has two jobs:
 
-Publishing must run after the suite, use secret-backed credentials and an explicit enable switch,
-and remain outside parallel test methods.
+1. `Framework checks` runs the static rules, compiles the project, and executes the local schema and
+   sanitizer tests without calling Restful Booker.
+2. `Live API suite` runs the complete `api-testng.xml` suite after the framework job succeeds. It
+   uses the suite's reviewed three-worker default.
+
+The live job runs for same-repository pull requests, pushes, and manual dispatches. GitHub does not
+provide repository or environment secrets to workflows triggered by pull requests from forks, so a
+fork receives the secret-free framework checks only. A maintainer must run the live suite from a
+trusted branch before such a change is merged.
+
+Anyone using a fork can still run the complete API suite. In the fork, create the `qa` Environment
+and add the two secrets described below, then open **Actions > API quality gate > Run workflow**.
+The manual `workflow_dispatch` run belongs to the fork, so it can use secrets configured in that
+fork. Alternatively, use the one-command local example above. The public demo credentials are not
+copied into this repository or workflow; each fork owner supplies the published values explicitly.
+
+### Configure the API secrets
+
+The live job references a GitHub Environment named `qa`. Create it and its secrets as follows:
+
+1. Open the repository on GitHub.
+2. Select **Settings > Environments**.
+3. Select **New environment**, enter `qa`, and select **Configure environment**.
+4. Under **Environment secrets**, select **Add secret**.
+5. Add `BOOKER_USERNAME` with the API username.
+6. Add `BOOKER_PASSWORD` with the API password.
+7. Optionally, under **Environment variables**, add `API_BASE_URI` when CI must target a URL other
+   than the checked-in QA default.
+8. Optionally restrict deployment branches or require an approver before the environment releases
+   its secrets.
+
+The secret names are case-sensitive and must match the workflow exactly. Do not include quotes in
+the stored values. The workflow validates that both credential secrets are present before starting
+the live suite.
+
+Repository-level secrets may be used instead when GitHub Environments are unavailable. Add the same
+names under **Settings > Secrets and variables > Actions > Repository secrets**. Environment secrets
+are preferred because they keep target-specific credentials and protection rules together.
+
+The same setup can be performed with GitHub CLI after authenticating with repository-admin access:
+
+```bash
+gh secret set --env qa BOOKER_USERNAME
+gh secret set --env qa BOOKER_PASSWORD
+gh variable set --env qa API_BASE_URI --body 'https://test-environment.example'
+```
+
+Each `gh secret set` command securely prompts for its value. Omit `API_BASE_URI` when the configured
+QA URL is correct.
+
+### Failure and artifact behavior
+
+The Maven test step does not use `continue-on-error`. A compilation error, configuration error,
+assertion failure, or TestNG failure returns a non-zero exit code and fails the job.
+
+Report generation and artifact upload use `if: always()`. They still execute after a failed test so
+the failure can be diagnosed; they do not change the failed job result. Artifacts are retained for
+14 days and include:
+
+- Surefire XML and diagnostic output.
+- Raw Allure results.
+- A generated Allure HTML report.
+- Sanitized framework logs.
+- `test-run-summary.json`.
+
+Open **Actions > API quality gate > workflow run > Artifacts** to download them. Reproduce a failure
+locally with the focused `-Dtest=Class#method` commands documented above before changing code.
+
+### Merge quality gate
+
+Configure branch protection for `main` and require these checks for trusted pull requests:
+
+- `Framework checks` must pass.
+- `Live API suite` must pass.
+- All owned test data must be cleaned up; cleanup failures are test failures, not warnings to ignore.
+- The approved manual-plan-to-automation mapping must remain complete.
+- Required review findings must be resolved.
+
+Do not make artifact generation or external publishing a merge blocker unless the report itself is
+the deliverable. The test result is authoritative; report rendering is diagnostic.
+
+### Flaky-test policy
+
+A failing test is treated as a real failure until its cause is established. The pipeline does not
+use TestNG retry analyzers or automatic reruns to turn a failure green.
+
+1. Reproduce the narrowest method sequentially with the same environment.
+2. Compare Surefire, Allure, sanitized logs, the manual CSV, and saved curl evidence.
+3. Classify the issue as an automation defect, product defect, configuration problem, public-service
+   reset, cleanup failure, concurrency issue, or documented behavior change.
+4. Fix the responsible code or baseline through the appropriate planner/healer workflow.
+5. If temporary quarantine is unavoidable, require a defect, owner, reason, and expiry date. Keep
+   the test visible in reports and restore it to the gate promptly.
+
+Mutating POST, PUT, PATCH, and DELETE requests are never retried automatically. A future GET retry
+requires repeated transient-failure evidence, a strict bound, and visible reporting.
+
+### Mobile tests in CI
+
+The Android suite is intentionally absent from the hosted-runner API job. The preferred production
+design is a separate device-cloud job:
+
+1. Build or obtain the versioned APK.
+2. Upload the APK and test package to the selected provider.
+3. Supply provider credentials through a protected GitHub Environment.
+4. Start one isolated Appium session per allocated device and pass provider-specific capabilities,
+   device ID, Android version, app reference, and server URL.
+5. Run `android-testng.xml` on the allocated device.
+6. Download Appium logs, screenshots, video, device logs, Surefire results, and Allure evidence.
+7. Always close provider sessions and publish artifacts after the run.
+
+A hosted Android emulator is suitable for an inexpensive smoke job only when the runner supports
+hardware acceleration and the emulator boot is verified. A device cloud is better for merge or
+scheduled coverage across real devices and Android versions. Do not start parallel sessions against
+one emulator; parallel mobile execution requires a device matrix with one UDID and isolated Appium
+connection per worker.
+
+### Keeping feedback time short
+
+As coverage grows:
+
+- Keep static checks and local contract tests first so structural failures return quickly.
+- Keep `cancel-in-progress` enabled so obsolete commits stop consuming runners.
+- Retain Maven dependency caching through `actions/setup-java`.
+- Run a small, stable smoke group on pull requests and the full regression after merge or on a
+  schedule once suite duration justifies the split.
+- Shard API tests only after independence, cleanup, and target capacity are proven. Keep each shard's
+  reports and case mapping visible.
+- Run the smallest relevant mobile device matrix on pull requests and broader OS/device coverage on
+  scheduled runs.
+- Track duration, failure category, quarantine age, and cleanup failures rather than optimizing only
+  for pass percentage.
+
+External Jira, Xray, Zephyr, or other result publishing remains disabled. When introduced, it must
+run after the suite, use secret-backed credentials and an explicit enable switch, and remain outside
+parallel test methods.
