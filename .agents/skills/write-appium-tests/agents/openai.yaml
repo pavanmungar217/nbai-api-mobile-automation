@@ -1,0 +1,3 @@
+interface:
+  display_name: "Write Appium Tests"
+  short_description: "Implement approved PageFactory mobile tests"

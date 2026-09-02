@@ -1,0 +1,3 @@
+com.nbai.automation.core.reporting.FrameworkTestListener
+com.nbai.automation.core.reporting.TestRunSummaryReporter
+

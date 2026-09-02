@@ -1,0 +1,3 @@
+interface:
+  display_name: "Heal Mobile Tests"
+  short_description: "Diagnose and repair evidenced Appium failures"

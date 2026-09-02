@@ -1,0 +1,3 @@
+interface:
+  display_name: "Review Mobile Automation"
+  short_description: "Audit Appium coverage, locators, and isolation"
