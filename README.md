@@ -692,6 +692,28 @@ The workflow has two jobs:
 2. `Live API suite` runs the complete `api-testng.xml` suite after the framework job succeeds. It
    uses the suite's reviewed three-worker default.
 
+Manual dispatch displays these inputs before starting the run:
+
+| Input | Available choices | Default | Effect |
+|---|---|---|---|
+| Module | `api` | `api` | Selects the currently CI-enabled API module. Mobile will be added only with a device-cloud job. |
+| Group | `all`, `smoke`, `regression`, `negative` | `all` | Overrides Surefire's TestNG group selection. `all` maps to the existing `api` group. |
+| Threads | `1` through `10` | `3` | Overrides Surefire/TestNG method-level worker count for that run. |
+
+To use them, open **Actions > API quality gate > Run workflow**, select the branch and dropdown
+values, then select **Run workflow**. The resolved module, TestNG group, and maximum worker count are
+written to the GitHub job summary. Push and pull-request runs do not receive manual inputs, so they
+continue to execute all API cases with three workers.
+
+The selectable groups come directly from the current test annotations:
+
+- `smoke`: health and valid-token checks.
+- `regression`: successful query, creation, retrieval, update, deletion, and lifecycle coverage.
+- `negative`: rejected authentication or mutation requests and not-found/empty-result behavior.
+
+Thread selection changes concurrency only; it does not shard, duplicate, or reorder tests. The
+chosen value is a maximum, so the number of simultaneously active methods can be lower.
+
 The live job runs for same-repository pull requests, pushes, and manual dispatches. GitHub does not
 provide repository or environment secrets to workflows triggered by pull requests from forks, so a
 fork receives the secret-free framework checks only. A maintainer must run the live suite from a

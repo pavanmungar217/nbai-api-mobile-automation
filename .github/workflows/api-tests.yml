@@ -5,6 +5,40 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      module:
+        description: Module to execute
+        required: true
+        default: api
+        type: choice
+        options:
+          - api
+      test_group:
+        description: TestNG group to execute
+        required: true
+        default: all
+        type: choice
+        options:
+          - all
+          - smoke
+          - regression
+          - negative
+      threads:
+        description: Maximum parallel TestNG workers
+        required: true
+        default: "3"
+        type: choice
+        options:
+          - "1"
+          - "2"
+          - "3"
+          - "4"
+          - "5"
+          - "6"
+          - "7"
+          - "8"
+          - "9"
+          - "10"
 
 permissions:
   contents: read
@@ -88,6 +122,39 @@ jobs:
         with:
           node-version: "24"
 
+      - name: Resolve suite selection
+        shell: bash
+        env:
+          SELECTED_MODULE: ${{ inputs.module || 'api' }}
+          SELECTED_GROUP: ${{ inputs.test_group || 'all' }}
+          SELECTED_THREADS: ${{ inputs.threads || '3' }}
+        run: |
+          if [[ "$SELECTED_MODULE" != "api" ]]; then
+            echo "::error::Unsupported module: $SELECTED_MODULE"
+            exit 1
+          fi
+
+          case "$SELECTED_GROUP" in
+            all) resolved_group="api" ;;
+            smoke|regression|negative) resolved_group="$SELECTED_GROUP" ;;
+            *)
+              echo "::error::Unsupported TestNG group: $SELECTED_GROUP"
+              exit 1
+              ;;
+          esac
+
+          if [[ ! "$SELECTED_THREADS" =~ ^([1-9]|10)$ ]]; then
+            echo "::error::Thread count must be between 1 and 10."
+            exit 1
+          fi
+
+          echo "TEST_GROUP=$resolved_group" >> "$GITHUB_ENV"
+          echo "TEST_THREADS=$SELECTED_THREADS" >> "$GITHUB_ENV"
+          echo "### API execution selection" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Module: $SELECTED_MODULE" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Group: $SELECTED_GROUP ($resolved_group)" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Maximum workers: $SELECTED_THREADS" >> "$GITHUB_STEP_SUMMARY"
+
       - name: Validate API secret configuration
         shell: bash
         run: |
@@ -96,8 +163,13 @@ jobs:
             exit 1
           fi
 
-      - name: Run low-thread API suite
-        run: ./mvnw --batch-mode --no-transfer-progress clean test
+      - name: Run selected API tests
+        run: >-
+          ./mvnw --batch-mode --no-transfer-progress clean
+          -Dgroups="$TEST_GROUP"
+          -Dparallel=methods
+          -DthreadCount="$TEST_THREADS"
+          test
 
       - name: Generate Allure HTML report
         if: always()
